@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live SOC Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.0/dist/darkly/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <style>
+        body { padding-top: 20px; }
+        .card { margin-bottom: 20px; }
+        .table-responsive { max-height: 400px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4 text-center">🛡️ Live SOC Dashboard</h1>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card bg-secondary">
+                    <div class="card-header">Events per Minute (last 30 min)</div>
+                    <div class="card-body">
+                        <canvas id="lineChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-secondary">
+                    <div class="card-header">Severity Distribution</div>
+                    <div class="card-body">
+                        <canvas id="pieChart" width="200" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-secondary">
+                    <div class="card-header">Top Alert Types</div>
+                    <div class="card-body">
+                        <canvas id="barChart" width="200" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card bg-secondary">
+            <div class="card-header">Recent Alerts</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover table-dark">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Source IP</th>
+                                <th>Dest IP</th>
+                                <th>Event Type</th>
+                                <th>Severity</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alert-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        let lineChart, pieChart, barChart;
+
+        function initCharts(data) {
+            lineChart = new Chart(document.getElementById('lineChart'), {
+                type: 'line',
+                data: {
+                    labels: data.line_labels,
+                    datasets: [{
+                        label: 'Events',
+                        data: data.line_data,
+                        borderColor: '#00bc8c',
+                        backgroundColor: 'rgba(0, 188, 140, 0.1)',
+                        tension: 0.1
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+            });
+
+            pieChart = new Chart(document.getElementById('pieChart'), {
+                type: 'pie',
+                data: {
+                    labels: data.pie_labels,
+                    datasets: [{
+                        data: data.pie_data,
+                        backgroundColor: ['#28a745', '#ffc107', '#dc3545']
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+
+            barChart = new Chart(document.getElementById('barChart'), {
+                type: 'bar',
+                data: {
+                    labels: data.bar_labels,
+                    datasets: [{
+                        label: 'Count',
+                        data: data.bar_data,
+                        backgroundColor: '#375a7f'
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        function updateCharts(data) {
+            lineChart.data.labels = data.line_labels;
+            lineChart.data.datasets[0].data = data.line_data;
+            lineChart.update();
+
+            pieChart.data.labels = data.pie_labels;
+            pieChart.data.datasets[0].data = data.pie_data;
+            pieChart.update();
+
+            barChart.data.labels = data.bar_labels;
+            barChart.data.datasets[0].data = data.bar_data;
+            barChart.update();
+        }
+
+        function updateTable(alerts) {
+            const tbody = document.getElementById('alert-table-body');
+            tbody.innerHTML = '';
+            alerts.forEach(alert => {
+                const row = document.createElement('tr');
+                let badgeClass = 'bg-success';
+                if (alert.severity === 'medium') badgeClass = 'bg-warning text-dark';
+                else if (alert.severity === 'high') badgeClass = 'bg-danger';
+                row.innerHTML = `
+                    <td>${alert.timestamp}</td>
+                    <td>${alert.source_ip}</td>
+                    <td>${alert.dest_ip}</td>
+                    <td>${alert.event_type}</td>
+                    <td><span class="badge ${badgeClass}">${alert.severity}</span></td>
+                    <td>${alert.description}</td>
+                `;
+                tbody.prepend(row);
+                if (tbody.children.length > 20) tbody.removeChild(tbody.lastChild);
+            });
+        }
+
+        socket.on('initial_data', (data) => {
+            initCharts(data.chart);
+            updateTable(data.alerts);
+        });
+
+        socket.on('chart_update', (data) => {
+            updateCharts(data);
+        });
+
+        socket.on('new_alert', (alert) => {
+            const tbody = document.getElementById('alert-table-body');
+            const row = document.createElement('tr');
+            let badgeClass = 'bg-success';
+            if (alert.severity === 'medium') badgeClass = 'bg-warning text-dark';
+            else if (alert.severity === 'high') badgeClass = 'bg-danger';
+            row.innerHTML = `
+                <td>${alert.timestamp}</td>
+                <td>${alert.source_ip}</td>
+                <td>${alert.dest_ip}</td>
+                <td>${alert.event_type}</td>
+                <td><span class="badge ${badgeClass}">${alert.severity}</span></td>
+                <td>${alert.description}</td>
+            `;
+            tbody.prepend(row);
+            if (tbody.children.length > 20) tbody.removeChild(tbody.lastChild);
+        });
+    </script>
+</body>
+</html>
